@@ -1,48 +1,67 @@
 import React, { useState } from 'react';
 import { Card, Form, Button, Alert, InputGroup, Row, Col } from 'react-bootstrap';
 import { performTopUp } from '../../services/walletService';
+import { formatCurrency } from '../../utils/formatCurrency';
 
 interface RechargeFormProps {
     onTopUpSuccess?: (newBalance: number) => void;
 }
 
 const RechargeForm: React.FC<RechargeFormProps> = ({ onTopUpSuccess }) => {
-    const [amount, setAmount] = useState<number | ''>('');
+    const [amountInput, setAmountInput] = useState<string>('');
     const [targetDocument, setTargetDocument] = useState<string>('');
     const [targetPhone, setTargetPhone] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
     const [message, setMessage] = useState<{ type: 'success' | 'danger', text: string } | null>(null);
+    const [isAmountFocused, setIsAmountFocused] = useState<boolean>(false);
+
+    const getCleanAmount = (input: string): number => {
+        let cleanString = input.replace(/,/g, '.').replace(/[^\d.]/g, '');
+        const parts = cleanString.split('.');
+
+        if (parts.length > 2) {
+            cleanString = parts[0] + '.' + parts.slice(1).join('');
+        }
+
+        if (parts.length > 1) {
+            cleanString = parts[0] + '.' + parts[1].slice(0, 2);
+        }
+
+        const result = parseFloat(cleanString);
+        return isNaN(result) ? 0 : result;
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setMessage(null);
 
-        if (typeof amount !== 'number' || amount <= 0) {
+        const amountValue = getCleanAmount(amountInput);
+
+        if (amountValue <= 0) {
             setMessage({ type: 'danger', text: '❌ Ingrese una cantidad válida y positiva.' });
             return;
         }
 
         if (targetDocument.trim().length === 0 || targetPhone.trim().length === 0) {
-            setMessage({ type: 'danger', text: '❌ El documento y el teléfono del destinatario son obligatorios.' });
+            setMessage({ type: 'danger', text: '❌ El documento y el teléfono son obligatorios.' });
             return;
         }
 
         setLoading(true);
 
         try {
-            const response = await performTopUp(amount, targetDocument.trim(), targetPhone.trim());
+            const response = await performTopUp(amountValue, targetDocument.trim(), targetPhone.trim());
 
             setMessage({
                 type: 'success',
-                text: `✅ Recarga Exitosa a ${targetPhone}. Documento: ${response?.document}. Nuevo Saldo (Propio): ${response.newBalance ? formatCurrency(Number(response.newBalance)) : '0,00'}`,
+                text: `✅ Recarga Exitosa a ${targetPhone}. Documento: ${response?.document}. Nuevo Saldo (Propio): ${response.newBalance ? formatCurrency(Number(response.newBalance)) : '0'}`,
             });
-            setAmount('');
+            setAmountInput('');
             setTargetDocument('');
             setTargetPhone('');
             if (onTopUpSuccess) {
                 onTopUpSuccess(response.newBalance);
             }
-
         } catch (error) {
             const msg = error instanceof Error ? error.message : 'Fallo en la recarga debido a un error desconocido.';
             setMessage({ type: 'danger', text: `❌ Error: ${msg}` });
@@ -51,26 +70,42 @@ const RechargeForm: React.FC<RechargeFormProps> = ({ onTopUpSuccess }) => {
         }
     };
 
-    const formatCurrency = (amount: number | null): string => {
-        if (amount === null) return 'N/A';
-        return amount.toLocaleString('es-CO', {
-            style: 'currency',
-            currency: 'COP',
-            minimumFractionDigits: 2
-        });
-    };
-
     const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value.replace(/[^0-9]/g, '');
-        setAmount(value === '' ? '' : parseInt(value, 10));
+        let value = e.target.value;
+        let cleanValue = value.replace(/[^\d.,]/g, '');
+
+        cleanValue = cleanValue.replace(/,/g, '.');
+
+        const parts = cleanValue.split('.');
+        if (parts.length > 2) {
+            cleanValue = parts[0] + '.' + parts.slice(1).join('');
+        }
+
+        if (parts.length > 1) {
+            cleanValue = parts[0] + '.' + parts[1].slice(0, 2);
+        }
+
+        if (cleanValue === '.') cleanValue = '0.';
+
+        if (cleanValue.length > 1 && cleanValue.startsWith('0') && cleanValue[1] !== '.') {
+             cleanValue = cleanValue.substring(1);
+        }
+
+        setAmountInput(cleanValue);
+        setMessage(null);
     };
 
     const handlePresetAmount = (presetAmount: number) => {
-        setAmount(presetAmount);
+        setAmountInput(presetAmount.toFixed(2));
         setMessage(null);
     };
 
     const presetAmounts = [10000, 50000, 100000];
+    const amountValue = getCleanAmount(amountInput);
+
+    const displayValue = isAmountFocused
+        ? amountInput
+        : formatCurrency(amountValue);
 
     return (
         <Card className="shadow-sm mb-4 border-0">
@@ -87,18 +122,18 @@ const RechargeForm: React.FC<RechargeFormProps> = ({ onTopUpSuccess }) => {
                             name="targetDocument"
                             value={targetDocument}
                             onChange={(e) => setTargetDocument(e.target.value)}
-                            placeholder="Documento de la cuenta a recargar"
+                            placeholder="Documento"
                             required
                             disabled={loading}
                         />
                     </Form.Group>
                     <Form.Group className="mb-3" controlId="formTargetPhone">
-                        <Form.Label className="fw-bold">Teléfono a Recargar</Form.Label>
+                        <Form.Label className="fw-bold">Teléfono</Form.Label>
                         <Form.Control
                             type="text"
                             name="targetPhone"
                             value={targetPhone}
-                            onChange={(e) => setTargetPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                            onChange={(e) => setTargetPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))}
                             placeholder="Ej: 30012345672"
                             required
                             disabled={loading}
@@ -111,10 +146,11 @@ const RechargeForm: React.FC<RechargeFormProps> = ({ onTopUpSuccess }) => {
                         {presetAmounts.map(pAmount => (
                             <Col key={pAmount} xs={4} className="d-grid gap-2">
                                 <Button
-                                    variant="outline-primary"
+                                    variant={amountValue === pAmount ? "primary" : "outline-primary"}
                                     size="sm"
                                     className="my-2 px-1 fw-bold"
                                     onClick={() => handlePresetAmount(pAmount)}
+                                    disabled={loading}
                                 >
                                     {formatCurrency(pAmount)}
                                 </Button>
@@ -129,22 +165,24 @@ const RechargeForm: React.FC<RechargeFormProps> = ({ onTopUpSuccess }) => {
                             <Form.Control
                                 type="text"
                                 name="amount"
-                                value={formatCurrency(Number(amount))}
+                                value={displayValue}
                                 onChange={handleAmountChange}
-                                placeholder="Mínimo 10,000 COP"
+                                onFocus={() => setIsAmountFocused(true)}
+                                onBlur={() => setIsAmountFocused(false)}
+                                placeholder="Mínimo 10.000,00 COP"
                                 required
                                 disabled={loading}
                             />
                         </InputGroup>
                         <Form.Text className="text-muted">
-                            Su saldo será descontado por el valor de la recarga.
+                            Su saldo será agregado por el valor de la recarga. (Ej. 10000.50)
                         </Form.Text>
                     </Form.Group>
 
                     <Button
                         variant="success"
                         type="submit"
-                        disabled={loading || amount === '' || amount <= 0 || targetDocument.trim().length === 0 || targetPhone.trim().length === 0}
+                        disabled={loading || amountValue < 10000 || targetDocument.trim().length === 0 || targetPhone.trim().length < 10}
                         className="w-100 mt-2"
                     >
                         {loading ? 'Procesando Recarga...' : 'Confirmar Recarga'}
